@@ -1,27 +1,36 @@
-from app.schemas.task import TaskCreate, TaskRead
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.models.task import Task
+from app.schemas.task import TaskCreate
 
-storage: dict[int, TaskRead] = {}
-next_id = 1
+async def list_tasks(db: AsyncSession):
+    result = await db.execute(select(Task).order_by(Task.id))
+    return result.scalars().all()
 
-def list_tasks() -> list[TaskRead]:
-    return list(storage.values())
+async def get_task(db: AsyncSession, task_id: int):
+    return await db.get(Task, task_id)
 
-def get_task(task_id: int) -> TaskRead | None:
-    return storage.get(task_id)
-
-def create_task(data: TaskCreate) -> TaskRead:
-    global next_id
-    task = TaskRead(id=next_id, **data.model_dump())
-    storage[next_id] = task
-    next_id += 1
+async def create_task(db: AsyncSession, data: TaskCreate):
+    task = Task(**data.model_dump())
+    db.add(task)
+    await db.commit()
+    await db.refresh(task)
     return task
 
-def update_task(task_id: int, data: TaskCreate) -> TaskRead | None:
-    if task_id not in storage:
+async def update_task(db: AsyncSession, task_id: int, data: TaskCreate):
+    task = await db.get(Task, task_id)
+    if task is None:
         return None
-    task = TaskRead(id=task_id, **data.model_dump())
-    storage[task_id] = task
+    for key, value in data.model_dump().items():
+        setattr(task, key, value)
+    await db.commit()
+    await db.refresh(task)
     return task
 
-def delete_task(task_id: int) -> bool:
-    return storage.pop(task_id, None) is not None
+async def delete_task(db: AsyncSession, task_id: int):
+    task = await db.get(Task, task_id)
+    if task is None:
+        return False
+    await db.delete(task)
+    await db.commit()
+    return True
